@@ -5,7 +5,7 @@ sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
 
 import cPickle as pickle
 import gzip
-from loss import accuracy, crossent
+from loss import accuracy, crossent, expand
 import theano
 import theano.tensor as T
 import numpy.random as rng
@@ -50,6 +50,8 @@ print validy.shape
 
 num_steps = 10
 
+print "Number of steps", num_steps
+
 def init_params_forward():
 
     p = {}
@@ -78,18 +80,18 @@ def init_params_synthmem():
 def join2(a,b):
         return T.concatenate([a,b], axis = 1)
 
-def bn(inp):
-    return inp#(inp - T.mean(inp,axis=1,keepdims=True)) / (0.001 + T.std(inp,axis=1,keepdims=True))
+def ln(inp):
+    return (inp - T.mean(inp,axis=1,keepdims=True)) / (0.001 + T.std(inp,axis=1,keepdims=True))
 
 
 def forward(p, h, x_true, y_true):
 
     inp = join2(h, x_true)
 
-    h1 = T.nnet.relu(T.dot(inp, p['W1']), alpha=0.02)
-    h2 = T.nnet.relu(T.dot(h1, p['W2']), alpha=0.02)
+    h1 = T.nnet.relu(ln(T.dot(inp, p['W1'])), alpha=0.02)
+    h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
 
-    y_est = T.nnet.sigmoid(T.dot(h2, p['Wy']))
+    y_est = T.nnet.softmax(T.dot(h2, p['Wy']))
 
     h_next = T.dot(h2, p['Wo'])
 
@@ -106,7 +108,7 @@ def synthmem(p, h_next):
 
     h = T.dot(h2, p['Wh'])
     x = T.dot(h2, p['Wx'])
-    y = T.nnet.sigmoid(T.dot(h2, p['Wy']))
+    y = T.nnet.softmax(T.dot(h2, p['Wy']))
 
     return h, x, y
 
@@ -129,11 +131,13 @@ h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true, y_true)
 
 h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next)
 
-rec_loss = T.abs_(x_rec - x_true).mean() + T.abs_(y_est - y_rec).mean() + T.abs_(h_in - h_in_rec).mean()
+rec_loss = 1.0 * (T.abs_(x_rec - x_true).mean() + T.abs_(h_in - h_in_rec).mean() + T.sqr(expand(y_true) - y_rec).mean())
+
+#should pull y_rec and y_true together!  
 
 updates_forward = lasagne.updates.adam(rec_loss + class_loss, params_forward.values() + params_synthmem.values())
 
-forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc], updates=updates_forward)
+forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc])
 
 #out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
@@ -144,12 +148,11 @@ forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in], outputs
 
 
 
-
 synthmem_method = theano.function(inputs = [])
 
 m = 1024
 
-for iteration in xrange(0,500000):
+for iteration in xrange(0,5000):
     r = randint(0,49900)
     x = trainx[r:r+64]
     y = trainy[r:r+64]
@@ -157,11 +160,13 @@ for iteration in xrange(0,500000):
     h_in = np.zeros(shape=(64,m)).astype('float32')
 
     for j in range(num_steps):
-        h_next, rec_loss, class_loss,acc = forward_method(x,y,h_in)
+        h_next, rec_loss, class_loss,acc,y_est = forward_method(x,y,h_in)
         h_in = h_next
+        #print "est", y_est
+        #print "true", y
 
     #using 500
-    if iteration % 100 == 0:
+    if iteration % 5 == 0:
         print "train acc", acc
         print "train cost", class_loss
         print "train rec_loss", rec_loss
@@ -171,7 +176,7 @@ for iteration in xrange(0,500000):
             h_in = np.zeros(shape=(1000,m)).astype('float32')
             for j in range(num_steps):
                 h_next,rec_loss,class_loss,acc = forward_method_noupdate(validx[ind:ind+1000], validy[ind:ind+1000], h_in)
-                h_in = valid_out['h_out']
+                h_in = h_next
 
             va.append(acc)
             vc.append(class_loss)
