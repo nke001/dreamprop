@@ -1,3 +1,7 @@
+#!/usr/bin/env python
+
+import sys
+sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
 
 import cPickle as pickle
 import gzip
@@ -11,28 +15,28 @@ from random import randint
 
 from load_cifar import CifarData
 
-#mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
 
-#train, valid, test = pickle.load(mn)
+mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
 
-#trainx,trainy = train
-#validx,validy = valid
+train, valid, test = pickle.load(mn)
 
-#trainy = trainy.astype('int32')
-#validy = validy.astype('int32')
+trainx,trainy = train
+validx,validy = valid
 
-config = {}
+trainy = trainy.astype('int32')
+validy = validy.astype('int32')
 
-config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
-config['mb_size'] = 128
-config['image_width'] = 32
+#config = {}
+#config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
+#config['mb_size'] = 128
+#config['image_width'] = 32
 
-cd_train = CifarData(config, segment="train")
-trainx = cd_train.images.reshape(50000,32*32*3) / 128.0 - 1.0
-trainy = cd_train.labels
-cd_valid = CifarData(config, segment="test")
-validx = cd_valid.images.reshape(10000,32*32*3) / 128.0 - 1.0
-validy = cd_valid.labels
+#cd_train = CifarData(config, segment="train")
+#trainx = cd_train.images.reshape(50000,32*32*3) / 128.0 - 1.0
+#trainy = cd_train.labels
+#cd_valid = CifarData(config, segment="test")
+#validx = cd_valid.images.reshape(10000,32*32*3) / 128.0 - 1.0
+#validy = cd_valid.labels
 
 print "train x", trainx
 
@@ -44,82 +48,103 @@ print trainy.shape
 print validx.shape
 print validy.shape
 
-m = 512
-num_internal_steps = 1
 num_steps = 10
 
-def init_params():
+def init_params_forward():
 
-    params = {}
+    p = {}
 
-    i = 32*32*3
+    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1024+784,1024)).astype('float32'))
+    p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,10)).astype('float32'))
+    p['Wo'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
 
-    params["A_W"] = theano.shared(0.01 * rng.normal(size = (num_steps, m+i,m)).astype('float32'))
-    params["B_W"] = theano.shared(0.01 * rng.normal(size = (num_steps, m+i,m)).astype('float32'))
-    params["C_W"] = theano.shared(0.01 * rng.normal(size = (num_steps, m,10)).astype('float32'))
 
-    params["A_b"] = theano.shared(0.0 * rng.normal(size = (num_steps, m,)).astype('float32'))
-    params["B_b"] = theano.shared(0.0 * rng.normal(size = (num_steps, m,)).astype('float32'))
-    params["C_b"] = theano.shared(0.0 * rng.normal(size = (num_steps, 10,)).astype('float32'))
+    return p
 
-    return params
+def init_params_synthmem():
 
-def join(a,b):
-    return T.concatenate([a,b], axis = 1)
+    p = {}
+
+    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['Wh'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['Wx'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,784)).astype('float32'))
+    p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,10)).astype('float32'))
+
+    return p
+
+
+def join2(a,b):
+        return T.concatenate([a,b], axis = 1)
 
 def bn(inp):
     return inp#(inp - T.mean(inp,axis=1,keepdims=True)) / (0.001 + T.std(inp,axis=1,keepdims=True))
 
-def network(x_in, y, h_in, p, in_grad, t):
 
-    relu = T.nnet.relu
-    h_in_init = h_in
+def forward(p, h, x_true, y_true):
 
-    loss = []
-    acc = []
-    problst = []
+    inp = join2(h, x_true)
 
-    for step in range(num_internal_steps):
+    h1 = T.nnet.relu(T.dot(inp, p['W1']), alpha=0.02)
+    h2 = T.nnet.relu(T.dot(h1, p['W2']), alpha=0.02)
 
-        x = x_in#*T.cast(srng.binomial(n=1,p=0.005,size=x_in.shape), 'float32')
+    y_est = T.nnet.sigmoid(T.dot(h2, p['Wy']))
 
-        delta_1 = relu(bn(T.dot(join(h_in,x), p['B_W'][t]) + p['B_b'][t]))
-        delta_2 = bn(T.dot(join(delta_1,x), p['A_W'][t]) + p['A_b'][t])
+    h_next = T.dot(h2, p['Wo'])
 
-        h_out = relu(delta_2 + h_in)
+    loss = crossent(y_est, y_true)
 
-        h_out = h_out*0.0 + relu(bn(p['B_b'][t] + T.dot(join(h_in,x), p['B_W'][t])))
+    return h_next, y_est, loss
 
-        prob = T.nnet.softmax(T.dot(h_out, p['C_W'][t]) + p['C_b'][t])
+def synthmem(p, h_next): 
 
-        h_in = h_out
+    h1 = T.nnet.relu(T.dot(h_next, p['W1']), alpha=0.02)
+    h2 = T.nnet.relu(T.dot(h1, p['W2']), alpha=0.02)
 
-        problst += [prob[0:1]]
-        loss += [crossent(prob, y)]
-        acc += [accuracy(prob, y)]
+    h = T.dot(h2, p['Wh'])
+    x = T.dot(h2, p['Wx'])
+    y = T.nnet.sigmoid(T.dot(h2, p['Wy']))
 
-    loss = sum(loss) / len(loss)
-    acc = sum(acc) / len(acc)
+    return h, x, y
 
-    out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
 
-    return {'loss' : loss, 'acc' : acc, 'h_out' : h_out, 'out_grad' : out_grad, 'prob' : T.stack(problst)}
 
-params = init_params()
-x = T.matrix()
-y = T.ivector()
+
+params_forward = init_params_forward()
+params_synthmem = init_params_synthmem()
+
+
+'''
+Set up the forward method and the synthmem_method
+'''
+
+x_true = T.matrix()
+y_true = T.ivector()
 h_in = T.matrix()
-in_grad = T.matrix()
-t = T.iscalar()
 
-net = network(x,y,h_in,params, in_grad, t)
+h_next, y_est, class_loss = forward(params_forward, h_in, x_true, y_true)
 
-param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
+h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next)
 
-updates = lasagne.updates.adam(param_grads, params.values())
+rec_loss = T.abs_(x_rec - x_true).mean() + T.abs_(y_est - y_rec).mean()
 
-train_method = theano.function(inputs = [x,y,h_in,in_grad,t], outputs = {'loss' : net['loss'], 'acc' : net['acc'], 'h_out' : net['h_out'], 'out_grad' : net['out_grad'], 'prob' : net['prob']}, updates = updates,allow_input_downcast=True)
-valid_method = theano.function(inputs = [x,y,h_in,t], outputs = {'loss' : net['loss'], 'acc' : net['acc'], 'h_out' : net['h_out']}, allow_input_downcast=True)
+updates_forward = lasagne.updates.adam(rec_loss + class_loss, params_forward.values() + params_synthmem.values())
+
+forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss], updates=updates_forward)
+
+
+#out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
+
+
+#param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
+
+
+
+
+
+synthmem_method = theano.function(inputs = [])
+
 
 for iteration in xrange(0,500000):
     r = randint(0,49900)
