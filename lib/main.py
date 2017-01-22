@@ -95,7 +95,9 @@ def forward(p, h, x_true, y_true):
 
     loss = crossent(y_est, y_true)
 
-    return h_next, y_est, loss
+    acc = accuracy(y_est, y_true)
+
+    return h_next, y_est, loss, acc
 
 def synthmem(p, h_next): 
 
@@ -123,16 +125,16 @@ x_true = T.matrix()
 y_true = T.ivector()
 h_in = T.matrix()
 
-h_next, y_est, class_loss = forward(params_forward, h_in, x_true, y_true)
+h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true, y_true)
 
 h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next)
 
-rec_loss = T.abs_(x_rec - x_true).mean() + T.abs_(y_est - y_rec).mean()
+rec_loss = T.abs_(x_rec - x_true).mean() + T.abs_(y_est - y_rec).mean() + T.abs_(h_in - h_in_rec).mean()
 
 updates_forward = lasagne.updates.adam(rec_loss + class_loss, params_forward.values() + params_synthmem.values())
 
-forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss], updates=updates_forward)
-
+forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc], updates=updates_forward)
+forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc])
 
 #out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
 
@@ -145,6 +147,7 @@ forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_nex
 
 synthmem_method = theano.function(inputs = [])
 
+m = 1024
 
 for iteration in xrange(0,500000):
     r = randint(0,49900)
@@ -152,37 +155,32 @@ for iteration in xrange(0,500000):
     y = trainy[r:r+64]
 
     h_in = np.zeros(shape=(64,m)).astype('float32')
-    in_grad = np.zeros(shape=(64,m)).astype('float32')
 
     for j in range(num_steps):
-        out = train_method(x,y,h_in,in_grad,j)
-        h_in = out['h_out']
-        in_grad = out['out_grad']
-        if j == 0:
-            in_grad *= 0.0
-        if iteration % 100 == 0:
-            print "grads", j, in_grad.mean()
-            #print "prob", j, out['prob'][0].round(2)
-            #print "h val", j, h_in.round(2)
+        h_next, rec_loss, class_loss,acc = forward_method(x,y,h_in)
+        h_in = h_next
 
     #using 500
     if iteration % 100 == 0:
-        print "train acc", out['acc']
-        print "train cost", out['loss']
+        print "train acc", acc
+        print "train cost", class_loss
+        print "train rec_loss", rec_loss
         va = []
         vc = []
         for ind in range(0,10000,1000):
             h_in = np.zeros(shape=(1000,m)).astype('float32')
             for j in range(num_steps):
-                valid_out = valid_method(validx[ind:ind+1000], validy[ind:ind+1000], h_in, j)
+                h_next,rec_loss,class_loss,acc = forward_method_noupdate(validx[ind:ind+1000], validy[ind:ind+1000], h_in)
                 h_in = valid_out['h_out']
 
-            va.append(valid_out['acc'])
-            vc.append(valid_out['loss'])
+            va.append(acc)
+            vc.append(class_loss)
 
         print "Iteration", iteration
         print "Valid accuracy", sum(va)/len(va)
         print "Valid cost", sum(vc)/len(vc)
+
+
 
 
 
