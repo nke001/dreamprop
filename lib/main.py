@@ -48,7 +48,7 @@ print trainy.shape
 print validx.shape
 print validy.shape
 
-num_steps = 10
+num_steps = 1
 
 print "Number of steps", num_steps
 
@@ -135,20 +135,48 @@ rec_loss = 1.0 * (T.abs_(x_rec - x_true).mean() + T.abs_(h_in - h_in_rec).mean()
 
 #should pull y_rec and y_true together!  
 
-updates_forward = lasagne.updates.adam(rec_loss + class_loss, params_forward.values() + params_synthmem.values())
+#NOTE NOTE NOTE: TRIED TURNING OFF CLASS LOSS IN FORWARD
+print "TURNED OFF CLASS LOSS IN FORWARD"
+updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc])
 
+
+
+'''
+Goal: get a method that takes h[i+1] and dL/dh[i+1].  It runs synthmem on h[i+1] to get estimates of x[i], y[i], and h[i].  It then runs the forward on those values and gets that loss.  
+
+
+'''
+
+h_next = T.matrix()
+g_next = T.matrix()
+
+h_last, x_last, y_last = synthmem(params_synthmem, h_next)
+
+x_last = 1.0*x_last + 0.0 * x_true
+y_last = 0*y_last.argmax(axis=1) + y_true
+
+h_next_rec, y_est, class_loss,acc = forward(params_forward, h_last, x_last, y_last)
+
+#g_next_use = g_next*1.0
+
+rec_weight = 1.0 / (1.0 + T.abs_(h_next -  h_next_rec).mean())
+g_next_use = g_next * rec_weight
+
+g_last = T.grad(class_loss, h_last, known_grads = {h_next_rec*1.0 : g_next_use})
+
 #out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
-
-
 #param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
 
+param_grads = T.grad(class_loss, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
 
+#Should we also update gradients through the synthmem module?
+synthmem_updates = lasagne.updates.adam(param_grads, params_forward.values())
 
+synthmem_method = theano.function(inputs = [h_next, g_next, x_true, y_true], outputs = [h_last, g_last, rec_weight, g_last], updates = synthmem_updates)
 
-synthmem_method = theano.function(inputs = [])
 
 m = 1024
 
@@ -164,6 +192,12 @@ for iteration in xrange(0,5000):
         h_in = h_next
         #print "est", y_est
         #print "true", y
+
+    g_next = np.zeros(shape=(64,m)).astype('float32')
+
+    for k in range(0,1):
+        h_next, g_next, rec_weight,g_last = synthmem_method(h_next,g_next,x,y)
+        #print k, "REC WEIGHT", rec_weight
 
     #using 500
     if iteration % 5 == 0:
