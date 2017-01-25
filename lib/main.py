@@ -15,28 +15,43 @@ from random import randint
 
 from load_cifar import CifarData
 
+#dataset = "mnist"
+dataset = "cifar"
+#dataset = "ptb_char"
 
-mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
+print "dataset", dataset
 
-train, valid, test = pickle.load(mn)
+if dataset == "mnist":
+    mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
 
-trainx,trainy = train
-validx,validy = valid
+    train, valid, test = pickle.load(mn)
 
-trainy = trainy.astype('int32')
-validy = validy.astype('int32')
+    trainx,trainy = train
+    validx,validy = valid
 
-#config = {}
-#config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
-#config['mb_size'] = 128
-#config['image_width'] = 32
+    trainy = trainy.astype('int32')
+    validy = validy.astype('int32')
 
-#cd_train = CifarData(config, segment="train")
-#trainx = cd_train.images.reshape(50000,32*32*3) / 128.0 - 1.0
-#trainy = cd_train.labels
-#cd_valid = CifarData(config, segment="test")
-#validx = cd_valid.images.reshape(10000,32*32*3) / 128.0 - 1.0
-#validy = cd_valid.labels
+    nf = 784
+
+elif dataset == "cifar":
+
+    nf = 32*32*3
+
+    config = {}
+    config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
+    config['mb_size'] = 64
+    config['image_width'] = 32
+
+    cd_train = CifarData(config, segment="train")
+    trainx = cd_train.images.reshape(50000,32*32*3) / 128.0 - 1.0
+    trainy = cd_train.labels.astype('int32')
+    cd_valid = CifarData(config, segment="test")
+    validx = cd_valid.images.reshape(10000,32*32*3) / 128.0 - 1.0
+    validy = cd_valid.labels.astype('int32')
+
+    trainx = trainx.astype('float32')
+    validx = validx.astype('float32')
 
 print "train x", trainx
 
@@ -48,16 +63,18 @@ print trainy.shape
 print validx.shape
 print validy.shape
 
-num_steps = 1
+num_steps = 3
 
+print "doing deep bp"
+print "using 1 layer forward net"
 print "Number of steps", num_steps
 
 def init_params_forward():
 
     p = {}
 
-    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1024+784,1024)).astype('float32'))
-    p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1024+nf,1024)).astype('float32'))
+    #p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
     p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,10)).astype('float32'))
     p['Wo'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
 
@@ -71,8 +88,20 @@ def init_params_synthmem():
     p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
     p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
     p['Wh'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
-    p['Wx'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,784)).astype('float32'))
+    p['Wh2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    
+
+    p['Wx'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['Wx2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,nf)).astype('float32'))
+
     p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,10)).astype('float32'))
+
+
+    p['bh'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,)).astype('float32'))
+    p['bh2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,)).astype('float32'))
+    
+    p['bx'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,)).astype('float32'))
+    p['bx2'] = theano.shared(0.03 * rng.normal(0,1,size=(nf,)).astype('float32'))
 
     return p
 
@@ -89,7 +118,8 @@ def forward(p, h, x_true, y_true):
     inp = join2(h, x_true)
 
     h1 = T.nnet.relu(ln(T.dot(inp, p['W1'])), alpha=0.02)
-    h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
+    #h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
+    h2 = h1
 
     y_est = T.nnet.softmax(T.dot(h2, p['Wy']))
 
@@ -103,16 +133,17 @@ def forward(p, h, x_true, y_true):
 
 def synthmem(p, h_next): 
 
-    h1 = T.nnet.relu(T.dot(h_next, p['W1']), alpha=0.02)
-    h2 = T.nnet.relu(T.dot(h1, p['W2']), alpha=0.02)
+    h1 = T.nnet.relu(ln(T.dot(h_next, p['W1'])), alpha=0.02)
+    h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
 
-    h = T.dot(h2, p['Wh'])
-    x = T.dot(h2, p['Wx'])
+    hn1 = T.nnet.relu(ln(T.dot(h2, p['Wh']) + p['bh']), alpha=0.02)
+    hn2 = T.dot(hn1, p['Wh2']) + p['bh2']
+
+    xh1 = T.nnet.relu(ln(T.dot(h2, p['Wx']) + p['bx']), alpha=0.02)
+    x = T.dot(xh1, p['Wx2']) + p['bx2']
     y = T.nnet.softmax(T.dot(h2, p['Wy']))
 
-    return h, x, y
-
-
+    return hn2, x, y
 
 
 params_forward = init_params_forward()
@@ -131,17 +162,17 @@ h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true, y_true)
 
 h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next)
 
-rec_loss = 1.0 * (T.abs_(x_rec - x_true).mean() + T.abs_(h_in - h_in_rec).mean() + T.sqr(expand(y_true) - y_rec).mean())
+print "0.1 mult"
+rec_loss = 0.1 * (T.sqr(x_rec - x_true).sum() + T.sqr(h_in - h_in_rec).sum() + crossent(y_rec, y_true))#T.sqr(expand(y_true) - y_rec).sum())
 
 #should pull y_rec and y_true together!  
 
 #NOTE NOTE NOTE: TRIED TURNING OFF CLASS LOSS IN FORWARD
-print "TURNED OFF CLASS LOSS IN FORWARD"
-updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
+print "TURNED ON CLASS LOSS IN FORWARD"
+updates_forward = lasagne.updates.adam(rec_loss + 1.0 * class_loss, params_forward.values() + params_synthmem.values())
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in], outputs = [h_next, rec_loss, class_loss,acc])
-
 
 
 '''
@@ -155,32 +186,35 @@ g_next = T.matrix()
 
 h_last, x_last, y_last = synthmem(params_synthmem, h_next)
 
-x_last = 1.0*x_last + 0.0 * x_true
-y_last = 0*y_last.argmax(axis=1) + y_true
+x_last = x_last + 0.0 * x_true
+y_last = y_last.argmax(axis=1) + 0*y_true
 
 h_next_rec, y_est, class_loss,acc = forward(params_forward, h_last, x_last, y_last)
 
 #g_next_use = g_next*1.0
 
 rec_weight = 1.0 / (1.0 + T.abs_(h_next -  h_next_rec).mean())
-g_next_use = g_next * rec_weight
 
+print "DOING MATCHING TRICK"
+g_next_use = g_next * T.eq(T.sgn(h_next), T.sgn(h_next_rec))
+
+hdiff = T.eq(T.sgn(h_next), T.sgn(h_next_rec)).mean()
 g_last = T.grad(class_loss, h_last, known_grads = {h_next_rec*1.0 : g_next_use})
 
 #out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
 #param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
 
-param_grads = T.grad(class_loss, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
+print "synthmem mult 1"
+param_grads = T.grad(class_loss * 1.0, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
 
 #Should we also update gradients through the synthmem module?
 synthmem_updates = lasagne.updates.adam(param_grads, params_forward.values())
 
-synthmem_method = theano.function(inputs = [h_next, g_next, x_true, y_true], outputs = [h_last, g_last, rec_weight, g_last], updates = synthmem_updates)
-
+synthmem_method = theano.function(inputs = [h_next, g_next, x_true, y_true], outputs = [h_last, g_last, rec_weight, g_last, hdiff], updates = synthmem_updates)
 
 m = 1024
 
-for iteration in xrange(0,5000):
+for iteration in xrange(0,100000):
     r = randint(0,49900)
     x = trainx[r:r+64]
     y = trainy[r:r+64]
@@ -195,9 +229,13 @@ for iteration in xrange(0,5000):
 
     g_next = np.zeros(shape=(64,m)).astype('float32')
 
-    for k in range(0,1):
-        h_next, g_next, rec_weight,g_last = synthmem_method(h_next,g_next,x,y)
+    for k in range(0,num_steps):
+        h_next, g_next, rec_weight,g_last,hdiff = synthmem_method(h_next,g_next,x,y)
         #print k, "REC WEIGHT", rec_weight
+        if iteration % 500 == 0:
+            print "hdiff", k, hdiff
+            print "hnext norm", (h_next**2).mean()
+            print "gnext norm", (g_next**2).mean()
 
     #using 500
     if iteration % 5 == 0:
