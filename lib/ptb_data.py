@@ -23,41 +23,43 @@ data = "/u/lambalex/Downloads/char_penntree.npz"
 
 import numpy as np
 
+fh = np.load(data)
+
+train = fh['train']
+valid = fh['valid']
+test = fh['test']
+
+train_len = train.shape[0] - train.shape[0] % 64
+
+train_m = train[:train_len].reshape((64, train_len/64))
+
+valid_len = valid.shape[0] - valid.shape[0] % 64
+
+valid_m = valid[:valid_len].reshape((64, valid_len/64))
+
+print train_m.shape
+print valid_m.shape
+
+'''
+79000, train
+6100, valid
+'''
+def get_batch(segment,index):
+    if segment == "train":
+        return train_m[:,index], train_m[:,index+1]
+    else:
+        return valid_m[:,index], valid_m[:,index+1]
+
+#0 to 49 is index range.  
+
+#First break each into chunks of length N/64.  
+
 if __name__ == "__main__":
 
-    fh = np.load(data)
+    for ind in range(0,100):
+        x,y = get_batch("train", ind)
 
-    train = fh['train']
-    valid = fh['valid']
-    test = fh['test']
-
-    train_len = train.shape[0] - train.shape[0] % 64
-
-    train_m = train[:train_len].reshape((64, train_len/64))
-
-    valid_len = valid.shape[0] - valid.shape[0] % 64
-
-    valid_m = valid[:valid_len].reshape((64, valid_len/64))
-
-    print train_m.shape
-    print valid_m.shape
-
-    '''
-    79000, train
-    6100, valid
-    '''
-    def get_batch(segment,index):
-        if segment == "train":
-            return train_m[:,index], train_m[:,index+1]
-        else:
-            return valid_m[:,index], valid_m[:,index+1]
-
-    #0 to 49 is index range.  
-
-    #First break each into chunks of length N/64.  
-
-
-
+        print "x", x, "y", y
 
 
 

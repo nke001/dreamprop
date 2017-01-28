@@ -13,55 +13,15 @@ import lasagne
 import numpy as np
 from random import randint
 
-from load_cifar import CifarData
+from ptb_data import get_batch
 
-#dataset = "mnist"
-dataset = "cifar"
-#dataset = "ptb_char"
+dataset = "ptb"
+#dataset = "seqmnist"
+#dataset = "vocal"
 
 print "dataset", dataset
 
-if dataset == "mnist":
-    mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
-
-    train, valid, test = pickle.load(mn)
-
-    trainx,trainy = train
-    validx,validy = valid
-
-    trainy = trainy.astype('int32')
-    validy = validy.astype('int32')
-
-    nf = 784
-
-elif dataset == "cifar":
-
-    nf = 32*32*3
-
-    config = {}
-    config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
-    config['mb_size'] = 64
-    config['image_width'] = 32
-
-    cd_train = CifarData(config, segment="train")
-    trainx = cd_train.images.reshape(50000,32*32*3) / 128.0 - 1.0
-    trainy = cd_train.labels.astype('int32')
-    cd_valid = CifarData(config, segment="test")
-    validx = cd_valid.images.reshape(10000,32*32*3) / 128.0 - 1.0
-    validy = cd_valid.labels.astype('int32')
-
-    trainx = trainx.astype('float32')
-    validx = validx.astype('float32')
-
-print "train x", trainx
-
 srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
-
-print trainx.shape
-print trainy.shape
-
-print validx.shape
-print validy.shape
 
 num_steps = 5
 
@@ -69,13 +29,16 @@ print "doing deep bp"
 print "using 1 layer forward net"
 print "Number of steps", num_steps
 
+n_feat = 50
+n_target = 50
+
 def init_params_forward():
 
     p = {}
 
-    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024+nf,1024)).astype('float32'))
+    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024+n_feat,1024)).astype('float32'))
     #p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
-    p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,11)).astype('float32'))
+    p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,n_target)).astype('float32'))
     #p['Wo'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,1024)).astype('float32'))
 
 
@@ -89,16 +52,16 @@ def init_params_synthmem():
     p['Wh2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,2048,1024)).astype('float32'))
 
     p['Wx'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,2048)).astype('float32'))
-    p['Wx2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,2048,nf)).astype('float32'))
+    p['Wx2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,2048,n_feat)).astype('float32'))
 
     p['Wy1'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,1024)).astype('float32'))
-    p['Wy2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,11)).astype('float32'))
+    p['Wy2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,n_target)).astype('float32'))
 
     p['bh'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,2048,)).astype('float32'))
     p['bh2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,)).astype('float32'))
     
     p['bx'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,2048,)).astype('float32'))
-    p['bx2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,nf,)).astype('float32'))
+    p['bx2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,n_feat,)).astype('float32'))
 
     p['by1'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,)).astype('float32'))
 
@@ -113,6 +76,8 @@ def ln(inp):
 
 
 def forward(p, h, x_true, y_true, i):
+
+    #instead of multiplying, need to index into embedding matrix.  
 
     inp = join2(h, x_true)
 
@@ -153,14 +118,14 @@ params_synthmem = init_params_synthmem()
 Set up the forward method and the synthmem_method
 '''
 
-x_true = T.matrix()
+x_true = T.ivector()
 y_true = T.ivector()
 h_in = T.matrix()
 step = T.iscalar()
 
 print "giving x and y on all steps"
 
-y_true_use = T.switch(T.ge(step, 4), y_true, 10)
+y_true_use = y_true#T.switch(T.ge(step, 4), y_true, 10)
 
 x_true_use = x_true# * T.eq(step,0)
 
@@ -224,9 +189,9 @@ synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_
 m = 1024
 
 for iteration in xrange(0,100000):
-    r = randint(0,49900)
-    x = trainx[r:r+64]
-    y = trainy[r:r+64]
+    r = iteration % 79000
+
+    x,y = get_batch("train", r)
 
     h_in = np.zeros(shape=(64,m)).astype('float32')
 
@@ -257,10 +222,13 @@ for iteration in xrange(0,100000):
         print "train rec_loss", rec_loss
         va = []
         vc = []
-        for ind in range(0,10000,1000):
+        for ind in range(0,100):
             h_in = np.zeros(shape=(1000,m)).astype('float32')
             for j in range(num_steps):
-                h_next,rec_loss,class_loss,acc = forward_method_noupdate(validx[ind:ind+1000], validy[ind:ind+1000], h_in, j)
+
+                vx, vy = get_batch("valid", ind)
+
+                h_next,rec_loss,class_loss,acc = forward_method_noupdate(vx, vy, h_in, j)
                 h_in = h_next
 
             va.append(acc)
