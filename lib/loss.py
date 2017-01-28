@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+
+
 import theano
 import theano.tensor as T
 
