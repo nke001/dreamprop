@@ -77,8 +77,6 @@ def ln(inp):
 
 def forward(p, h, x_true, y_true, i):
 
-    #instead of multiplying, need to index into embedding matrix.  
-
     inp = join2(h, x_true)
 
     h1 = T.nnet.relu(ln(T.dot(inp, p['W1'][i])), alpha=0.02)
@@ -127,7 +125,7 @@ print "giving x and y on all steps"
 
 y_true_use = y_true#T.switch(T.ge(step, 4), y_true, 10)
 
-x_true_use = x_true# * T.eq(step,0)
+x_true_use = expand(x_true,50).astype('float32')
 
 h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true_use, y_true_use,step)
 
@@ -140,7 +138,7 @@ rec_loss = 0.1 * (T.sqr(x_rec - x_true_use).sum() + T.sqr(h_in - h_in_rec).sum()
 
 print "TURNED OFF CLASS LOSS IN FORWARD"
 #TODO: add in back params_forward.values()
-updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
+updates_forward = lasagne.updates.adam(rec_loss + 1.0 * class_loss, params_forward.values() + params_synthmem.values())
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
@@ -223,7 +221,7 @@ for iteration in xrange(0,100000):
         va = []
         vc = []
         for ind in range(0,100):
-            h_in = np.zeros(shape=(1000,m)).astype('float32')
+            h_in = np.zeros(shape=(64,m)).astype('float32')
             for j in range(num_steps):
 
                 vx, vy = get_batch("valid", ind)

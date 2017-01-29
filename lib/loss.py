@@ -10,8 +10,8 @@ def crossent(p,y):
 def accuracy(p,y):
     return T.mean(T.eq(T.argmax(p, axis = 1),y))
 
-def expand(y):
-    return T.extra_ops.to_one_hot(y, 10)
+def expand(y,n):
+    return T.extra_ops.to_one_hot(y, n)
 
 if __name__ == "__main__":
 
