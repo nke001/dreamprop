@@ -16,6 +16,8 @@ import time
 
 from ptb_data import get_batch
 
+sys.setrecursionlimit(9999999)
+
 #dataset = "ptb"
 dataset = "seqmnist"
 #dataset = "vocal"
@@ -188,8 +190,6 @@ hdiff = T.eq(T.sgn(h_next), T.sgn(h_next_rec)).mean()
 g_last = T.grad(class_loss, h_last, known_grads = {h_next_rec*1.0 : g_next_use})
 g_last_local = T.grad(class_loss, h_last)
 
-#out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
-#param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
 
 print "synthmem mult 1"
 param_grads = T.grad(class_loss * 1.0, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
@@ -206,6 +206,31 @@ BPTT method:
     -Optimize total loss wrt all params.  
 '''
 
+x = T.imatrix()
+y = T.imatrix()
+step = T.iscalar()
+
+def one_step(xval,yval,total_loss,total_acc,hval,yel):
+    h_next,y_est,loss,acc = forward(params_forward, hval, expand(xval,2).astype('float32'),yval,step)
+    
+    return [(loss).astype('float32'),(acc).astype('float32'),h_next.astype('float32'),y_est.argmax(axis=1).astype('float32')]
+
+h_next = theano.shared(0.0 * rng.normal(size = (64,1024)).astype('float32'))
+
+y_est = theano.shared(np.zeros(shape=(64,)).astype('float32'))
+
+scan_res, scan_updates = theano.scan(fn=one_step, sequences=[x.T,y.T], outputs_info=[np.asarray(0.0,dtype='float32'),np.asarray(0.0,dtype='float32'),h_next,y_est])
+
+total_loss, total_acc, h_final, yest = scan_res
+
+lr = 0.001
+print "learning rate", lr
+updates = lasagne.updates.adam(total_loss.mean(), params_forward.values(), learning_rate=lr)
+
+t0 = time.time()
+train_bptt = theano.function(inputs = [x,y,step], outputs = [total_loss.sum()/64.0, total_acc.mean(),yest[:,0]], updates = updates)
+print "time to compile", time.time() - t0
+
 m = 1024
 
 ta = []
@@ -213,65 +238,20 @@ tc = []
 hlst = []
 
 for iteration in xrange(0,100000):
-    r = iteration % num_steps
 
-    x,y = get_batch("train", r)
-
-    if r == 0:
-        h_in = np.zeros(shape=(64,m)).astype('float32')
+    x,y = get_batch("train")
 
     t0 = time.time()
-    h_next, rec_loss, class_loss,acc,y_est = forward_method(x,y,h_in,r)
-    print time.time() - t0, "TIME TO DO ONE FORWARD STEP"
-    h_in = h_next
-    #hlst.append(h_next)
-
-    ta.append(acc)
-    tc.append(class_loss)
-
     
+    loss,acc,yest = train_bptt(x,y,np.array(0.0).astype('int32'))
 
-    #if r == num_steps-1:
-    #    g_next = np.zeros(shape=(64,m)).astype('float32')
-    #    for k in reversed(range(0,num_steps)):
-    #        h_next, g_last,hdiff,g_last_local = synthmem_method(hlst[k],g_next,k)
-    #        g_next = g_last
-            #if iteration % 1000 == 0:
-            #    print "========"
-            #    print "hdiff", k, hdiff
-            #    print "hnext norm", (h_next**2).mean()
-            #    print "gnext norm", (g_next**2).mean()
-            #    print "glast local", (g_last_local**2).mean()
+    print loss,acc
 
-        #hlst = []
+    if iteration % 1000 == 0:
+        print time.time() - t0, "TIME TO TRAIN ONE EXAMPLE"
 
-    #using 500
-    if iteration % 760*5 == 0:
-        print "========================================"
-        if len(ta)>500:
-            print "train acc", sum(ta)/len(ta)
-            print "train cost", sum(tc)/len(tc)
-            ta = []
-            tc = []
-            print "train rec_loss", rec_loss
-        va = []
-        vc = []
-        for ind in range(0,1):
-            h_in_v = np.zeros(shape=(64,m)).astype('float32')
-            for j in range(num_steps):
-
-                vx, vy = get_batch("valid", j)
-
-                h_next_v,rec_loss,class_loss,acc = forward_method_noupdate(vx, vy, h_in_v, j)
-                h_in_v = h_next_v
-
-                va.append(acc)
-                vc.append(class_loss)
-
-        print "REVERSED RANGE"
-        print "Iteration", iteration
-        print "Valid accuracy", sum(va)/len(va)
-        print "Valid cost", sum(vc)/len(vc)
+        print "true", y[0,:].tolist()
+        print "est", yest.tolist()   
 
 
 
