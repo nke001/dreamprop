@@ -69,7 +69,7 @@ if __name__ == "__main__":
 
     config = {}
     
-    config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
+    config["cifar_location"] = "/u/kenan/data/cifar/cifar-10-batches-py/"
     config['mb_size'] = 128
     config['image_width'] = 32
 

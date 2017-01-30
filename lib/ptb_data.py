@@ -19,7 +19,7 @@ X: (ind, minibatch, time)
 
 '''
 
-data = "/u/lambalex/Downloads/char_penntree.npz"
+data = "/data/lisatmp3/kenan/data/char_penntree.npz"
 
 import numpy as np
 

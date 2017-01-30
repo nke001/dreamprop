@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import sys
-sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
+sys.path.append("/data/lisatmp3/kenan/dreamprop/lib")
 
 import cPickle as pickle
 import gzip
@@ -22,7 +22,7 @@ dataset = "cifar"
 print "dataset", dataset
 
 if dataset == "mnist":
-    mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
+    mn = gzip.open("/data/lisatmp3/kenan/data/mnist/mnist.pkl.gz")
 
     train, valid, test = pickle.load(mn)
 
@@ -39,7 +39,7 @@ elif dataset == "cifar":
     nf = 32*32*3
 
     config = {}
-    config["cifar_location"] = "/u/lambalex/data/cifar/cifar-10-batches-py/"
+    config["cifar_location"] = "/data/lisatmp3/kenan/data/cifar/cifar-10-batches-py/"
     config['mb_size'] = 64
     config['image_width'] = 32
 

@@ -3,7 +3,7 @@ Code for running on sequential MNIST.
 '''
 import numpy as np
 
-datafile = "/u/lambalex/data/binarized_mnist/structured/train.txt"
+datafile = "/data/lisatmp3/kenan/data/binarized_mnist/structured/train.txt"
 
 fh = open(datafile, "r")
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 
 import sys
-sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
+sys.path.append("/data/lisatmp3/kenan/dreamprop/lib")
 
 import cPickle as pickle
 import gzip
