@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 
+import sys
+sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
 
 import theano
 import theano.tensor as T
