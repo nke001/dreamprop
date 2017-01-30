@@ -160,9 +160,9 @@ step = T.iscalar()
 
 print "giving x and y on all steps"
 
-y_true_use = T.switch(T.ge(step, 4), y_true, 10)
+y_true_use = y_true
 
-x_true_use = x_true# * T.eq(step,0)
+x_true_use = x_true
 
 h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true_use, y_true_use,step)
 
@@ -242,12 +242,6 @@ for iteration in xrange(0,100000):
     for k in reversed(range(0,num_steps)):
         h_next, g_last,hdiff,g_last_local = synthmem_method(h_next,g_next,k)
         g_next = g_last
-        if iteration % 1000 == 0:
-            print "========"
-            print "hdiff", k, hdiff
-            print "hnext norm", (h_next**2).mean()
-            print "gnext norm", (g_next**2).mean()
-            print "glast local", (g_last_local**2).mean()
 
     #using 500
     if iteration % 100 == 0:
