@@ -5,7 +5,7 @@ sys.path.append("/u/lambalex/DeepLearning/dreamprop/lib")
 
 import cPickle as pickle
 import gzip
-from loss import accuracy, crossent, expand
+from loss import accuracy, crossent, expand, nll
 import theano
 import theano.tensor as T
 import numpy.random as rng
@@ -103,7 +103,7 @@ def forward(p, h, x_true, y_true, i):
     #h_next = T.dot(h2, p['Wo'][i])
     h_next = h1
 
-    loss = crossent(y_est, y_true)
+    loss = nll(y_est, y_true,2)
 
     acc = accuracy(y_est, y_true)
 
@@ -223,12 +223,13 @@ scan_res, scan_updates = theano.scan(fn=one_step, sequences=[x.T,y.T], outputs_i
 
 total_loss, total_acc, h_final, yest = scan_res
 
-lr = 0.001
+lr = 0.0001
 print "learning rate", lr
-updates = lasagne.updates.adam(total_loss.mean(), params_forward.values(), learning_rate=lr)
+updates = lasagne.updates.rmsprop(total_loss.mean(), params_forward.values(), learning_rate=lr)
 
 t0 = time.time()
-train_bptt = theano.function(inputs = [x,y,step], outputs = [total_loss.sum()/64.0, total_acc.mean(),yest[:,0]], updates = updates)
+
+train_bptt = theano.function(inputs = [x,y,step], outputs = [total_loss.sum()/64.0, total_acc.mean(),yest], updates = updates)
 print "time to compile", time.time() - t0
 
 m = 1024
@@ -245,13 +246,15 @@ for iteration in xrange(0,100000):
     
     loss,acc,yest = train_bptt(x,y,np.array(0.0).astype('int32'))
 
+    print "yest shape", yest.shape
+
     print loss,acc
 
-    if iteration % 1000 == 0:
+    if iteration % 100 == 0:
         print time.time() - t0, "TIME TO TRAIN ONE EXAMPLE"
 
         print "true", y[0,:].tolist()
-        print "est", yest.tolist()   
+        print "est", yest[:,0].tolist()
 
 
 

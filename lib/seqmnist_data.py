@@ -21,6 +21,7 @@ import random
 def get_batch(segment):
     r = random.randint(0,49900)
     return train[r:r+64,:-1].astype('int32'), train[r:r+64,1:].astype('int32')
+    #return train[r:r+64,:].astype('int32'), train[r:r+64,:].astype('int32')
 
 if __name__ == "__main__":
 
