@@ -14,6 +14,12 @@ import numpy as np
 from random import randint
 import time
 
+import nn_layers
+
+from nn_layers import param_init_lnlstm, lnlstm_layer, param_init_lngru, lngru_layer, param_init_fflayer, fflayer
+
+from utils import init_tparams
+
 from ptb_data import get_batch
 
 sys.setrecursionlimit(9999999)
@@ -50,154 +56,79 @@ def init_params_forward():
 
     p = {}
 
-    p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024+n_feat,1024)).astype('float32'))
-    #p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
-    p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,n_target)).astype('float32'))
-    #p['Wo'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,1024)).astype('float32'))
+    param_init_lngru({}, params=p, prefix='gru1', nin=512, dim=512)
 
+    param_init_lngru({}, params=p, prefix='gru2', nin=512, dim=512)
 
-    return p
+    tparams = nn_layers.init_tparams(p)
+
+    tparams["w1"] = theano.shared(0.01 * rng.normal(0,1,size=(2,512)).astype('float32'))
+
+    tparams["w2"] = theano.shared(0.01 * rng.normal(0,1,size=(512*2+2,512)).astype('float32'))
+    tparams["b2"] = theano.shared(0.0 * rng.normal(0,1,size=(512,)).astype('float32'))
+
+    tparams["Wy"] = theano.shared(0.01 * rng.normal(0,1,size=(512,2)).astype('float32'))
+    tparams["by"] = theano.shared(0.0 * rng.normal(0,1,size=(2,)).astype('float32'))
+
+    return tparams
 
 def init_params_synthmem():
 
     p = {}
 
-    p['Wh'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,2048)).astype('float32'))
-    p['Wh2'] = theano.shared(0.03 * rng.normal(0,1,size=(1,2048,1024)).astype('float32'))
+    param_init_fflayer({},params=p,prefix="synthmem_fc1", nin=1024, nout=1024)
 
-    p['Wx'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,2048)).astype('float32'))
-    p['Wx2'] = theano.shared(0.03 * rng.normal(0,1,size=(1,2048,n_feat)).astype('float32'))
+    tparams = nn_layers.init_tparams(p)
 
-    p['Wy1'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,1024)).astype('float32'))
-    p['Wy2'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,n_target)).astype('float32'))
-
-    p['bh'] = theano.shared(0.03 * rng.normal(0,1,size=(1,2048,)).astype('float32'))
-    p['bh2'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,)).astype('float32'))
-    
-    p['bx'] = theano.shared(0.03 * rng.normal(0,1,size=(1,2048,)).astype('float32'))
-    p['bx2'] = theano.shared(0.03 * rng.normal(0,1,size=(1,n_feat,)).astype('float32'))
-
-    p['by1'] = theano.shared(0.03 * rng.normal(0,1,size=(1,1024,)).astype('float32'))
-
-    return p
+    return tparams
 
 def join2(a,b):
         return T.concatenate([a,b], axis = 1)
 
+def join3(a,b,c):
+        return T.concatenate([a,b,c], axis = 1)
+
+
 def ln(inp):
     return (inp - T.mean(inp,axis=1,keepdims=True)) / (0.001 + T.std(inp,axis=1,keepdims=True))
 
+def forward(p, h, x_true, y_true):
 
-def forward(p, h, x_true, y_true, i):
 
-    i *= 0
+    print "USING LAYER NORM"
 
-    inp = join2(h, x_true)
+    emb = T.dot(x_true, p['w1'])
 
-    h1 = T.nnet.relu(ln(T.dot(inp, p['W1'][i])), alpha=0.02)
-    #h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
-    h2 = h1
+    h_next1 = lngru_layer(p,emb,{},prefix='gru1',mask=None,one_step=True,init_state=h[:,:512],backwards=False)
 
-    y_est = T.nnet.softmax(T.dot(h2, p['Wy'][i]))
+    h_next2 = lngru_layer(p,h_next1[0],{},prefix='gru2',mask=None,one_step=True,init_state=h[:,512:],backwards=False)
 
-    #h_next = T.dot(h2, p['Wo'][i])
-    h_next = h1
+    hout = join3(h_next2[0], h_next1[0], x_true)
+
+    h2 = T.tanh(T.dot(hout, p['w2']) + p['b2'])
+
+    y_est = T.nnet.softmax(T.dot(h2, p['Wy']) + p['by'])
 
     loss = nll(y_est, y_true,2)
 
     acc = accuracy(y_est, y_true)
 
-    return h_next, y_est, loss, acc
-
-def synthmem(p, h_next, i): 
-
-    i *= 0
-
-    hn1 = T.nnet.relu(ln(T.dot(h_next, p['Wh'][i]) + p['bh'][i]), alpha=0.02)
-    hn2 = T.nnet.relu(T.dot(hn1, p['Wh2'][i]) + p['bh2'][i], alpha=0.02)
-
-    xh1 = T.nnet.relu(ln(T.dot(h_next, p['Wx'][i]) + p['bx'][i]), alpha=0.02)
-    x = T.dot(xh1, p['Wx2'][i]) + p['bx2'][i]
-    
-    yh1 = T.nnet.relu(ln(T.dot(h_next, p['Wy1'][i]) + p['by1'][i]), alpha=0.02)
-    y = T.nnet.softmax(T.dot(yh1, p['Wy2'][i]))
-
-    return hn2, x, y
-
+    return join2(h_next1[0],h_next2[0]), y_est, loss, acc
 
 params_forward = init_params_forward()
 params_synthmem = init_params_synthmem()
 
+def synthmem(p, h_next, h_last):
+
+    h_out = fflayer(p,h_next,{},prefix='synthmem_fc1',activ='lambda x: tensor.tanh(x)')
+
+    rec_loss_h = T.mean(T.abs_(h_out - h_last))
+
+    return h_out, rec_loss_h
 
 '''
 Set up the forward method and the synthmem_method
 '''
-
-x_true = T.ivector()
-y_true = T.ivector()
-h_in = T.matrix()
-step = T.iscalar()
-
-print "giving x and y on all steps"
-
-y_true_use = y_true#T.switch(T.ge(step, 4), y_true, 10)
-
-x_true_use = expand(x_true,n_feat).astype('float32')
-
-h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true_use, y_true_use,step)
-
-h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next,step)
-
-print "0.1 mult"
-rec_loss = 0.0 * (T.sqr(x_rec - x_true_use).sum() + T.sqr(h_in - h_in_rec).sum() + crossent(y_rec, y_true_use))
-
-#should pull y_rec and y_true together!  
-
-print "TURNED OFF CLASS LOSS IN FORWARD"
-#TODO: add in back params_forward.values()
-updates_forward = lasagne.updates.adam(rec_loss + 1.0 * class_loss, params_forward.values() + params_synthmem.values(), learning_rate = 0.0001)
-
-forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
-forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
-
-
-'''
-Goal: get a method that takes h[i+1] and dL/dh[i+1].  It runs synthmem on h[i+1] to get estimates of x[i], y[i], and h[i].  It then runs the forward on those values and gets that loss.  
-
-
-'''
-
-h_next = T.matrix()
-g_next = T.matrix()
-
-h_last, x_last, y_last = synthmem(params_synthmem, h_next,step)
-
-x_last = x_last
-y_last = y_last.argmax(axis=1)
-
-h_next_rec, y_est, class_loss,acc = forward(params_forward, h_last, x_last, y_last,step)
-
-print "ONLY USING CLASS LOSS ON FINAL STEP"
-class_loss = class_loss * T.eq(step,num_steps-1)
-
-#g_next_use = g_next*1.0
-
-
-print "DOING MATCHING TRICK"
-g_next_use = g_next * T.eq(T.sgn(h_next), T.sgn(h_next_rec))
-
-hdiff = T.eq(T.sgn(h_next), T.sgn(h_next_rec)).mean()
-g_last = T.grad(class_loss, h_last, known_grads = {h_next_rec*1.0 : g_next_use})
-g_last_local = T.grad(class_loss, h_last)
-
-
-print "synthmem mult 1"
-param_grads = T.grad(class_loss * 1.0, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
-
-#Should we also update gradients through the synthmem module?
-synthmem_updates = lasagne.updates.adam(param_grads, params_forward.values(), learning_rate = 0.0001)
-
-synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_last, g_last, hdiff, g_last_local], updates = synthmem_updates)
 
 
 '''
@@ -208,31 +139,54 @@ BPTT method:
 
 x = T.imatrix()
 y = T.imatrix()
-step = T.iscalar()
+h_initial = T.matrix()
 
-def one_step(xval,yval,total_loss,total_acc,hval,yel):
-    h_next,y_est,loss,acc = forward(params_forward, hval, expand(xval,2).astype('float32'),yval,step)
-    
-    return [(loss).astype('float32'),(acc).astype('float32'),h_next.astype('float32'),y_est.argmax(axis=1).astype('float32')]
+def one_step(xval,yval,total_loss,total_acc,hval,yel,h_rec_loss_last):
+    h_next,y_est,loss,acc = forward(params_forward, hval, expand(xval,2).astype('float32'),yval)
 
-h_next = theano.shared(0.0 * rng.normal(size = (64,1024)).astype('float32'))
+    #h_last_rec, h_rec_loss = synthmem(params_synthmem, h_next, hval)
+    h_rec_loss = 0.0 * T.mean(total_loss)
+
+    #goes from hval, xval, yval to h_next.  Should train model to predict xval,yval,hval from h_next.  
+
+    return [(loss).astype('float32'),(acc).astype('float32'),h_next.astype('float32'),y_est.argmax(axis=1).astype('float32'),h_rec_loss]
+
+h_initial_shared = theano.shared(0.0 * rng.normal(size = (1,512*2)).astype('float32'))
+h_next = h_initial + T.addbroadcast(h_initial_shared, 0)
 
 y_est = theano.shared(np.zeros(shape=(64,)).astype('float32'))
 
-scan_res, scan_updates = theano.scan(fn=one_step, sequences=[x.T,y.T], outputs_info=[np.asarray(0.0,dtype='float32'),np.asarray(0.0,dtype='float32'),h_next,y_est])
+h_rec_loss = theano.shared(np.array(0.0).astype('float32'))
 
-total_loss, total_acc, h_final, yest = scan_res
+scan_res, scan_updates = theano.scan(fn=one_step, sequences=[x.T,y.T], outputs_info=[np.asarray(0.0,dtype='float32'),np.asarray(0.0,dtype='float32'),h_next,y_est, h_rec_loss])
+
+total_loss, total_acc, h_final, yest, h_rec_loss = scan_res
+
+print "mult rec loss 100"
+loss_use = total_loss.mean() + 100.0 * h_rec_loss.mean()
 
 lr = 0.0001
 print "learning rate", lr
-updates = lasagne.updates.rmsprop(total_loss.mean(), params_forward.values(), learning_rate=lr)
+rule = lasagne.updates.adam
+print "rule", rule
+updates = rule(loss_use, params_forward.values() + [h_initial_shared], learning_rate=lr)
 
 t0 = time.time()
 
-train_bptt = theano.function(inputs = [x,y,step], outputs = [total_loss.sum()/64.0, total_acc.mean(),yest], updates = updates)
+train_bptt = theano.function(inputs = [x,y,h_initial], outputs = [h_final[-1], total_loss.sum()/64.0, total_acc.mean(),yest], updates = updates)
 print "time to compile", time.time() - t0
 
-m = 1024
+evaluate = theano.function(inputs = [x,y,h_initial], outputs = [h_final[-1], total_loss.sum()/64.0, total_acc.mean(),yest,h_rec_loss.sum()/64.0])
+
+x_one = T.ivector()
+y_one = T.ivector()
+h_one = T.matrix()
+
+hn, _, loss, _ = forward(params_forward, h_one, expand(x_one,2).astype('float32'),y_one)
+
+updates = lasagne.updates.adam(loss, params_forward.values())
+
+step_forward = theano.function(inputs = [x_one, y_one, h_one], outputs=[hn], updates=updates)
 
 ta = []
 tc = []
@@ -243,20 +197,45 @@ for iteration in xrange(0,100000):
     x,y = get_batch("train")
 
     t0 = time.time()
-    
-    loss,acc,yest = train_bptt(x,y,np.array(0.0).astype('int32'))
+
+    h_initial = 0.0 * np.random.normal(size=(64,1024)).astype('float32')
+
+    t0 = time.time()
+    for step in range(0,20):
+        h_initial,_,_,_ = train_bptt(x[:,step*39:step*40],y[:,step*39:step*40],h_initial)
+    print time.time() - t0, "time to run forward on one example, 10x78"
 
     print "yest shape", yest.shape
 
     print loss,acc
 
     if iteration % 100 == 0:
-        print time.time() - t0, "TIME TO TRAIN ONE EXAMPLE"
-
-        print "true", y[0,:].tolist()
-        print "est", yest[:,0].tolist()
+        print "iteration", iteration
+        #print time.time() - t0, "TIME TO TRAIN ONE EXAMPLE"
 
 
+        #print "true", y[0,:].tolist()
+        #print "est", yest[:,0].tolist()
+
+        lossl = []
+        accl = []
+        hreclossl = []
+        for j in range(0,50):
+            x,y = get_batch("test",64)
+
+            h_initial = 0.0 * np.random.normal(size=(64,1024)).astype('float32')
+
+            t0 = time.time()
+            h_out,loss,acc,yest,h_rec_loss = evaluate(x,y,h_initial)
+            print time.time() - t0, "time to do validation update"
+
+            lossl.append(loss)
+            accl.append(acc)
+            hreclossl.append(h_rec_loss)
+
+        print "TEST LOSS", iteration, sum(lossl)/len(lossl)
+        print "TEST ACC", iteration, sum(accl)/len(accl)
+        print "TEST RECLOSS", iteration, sum(hreclossl)/len(hreclossl)
 
 
 
