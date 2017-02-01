@@ -15,14 +15,16 @@ from random import randint
 
 from load_cifar import CifarData
 
-#dataset = "mnist"
-dataset = "cifar"
+from discriminator import Discriminator
+
+dataset = "mnist"
+# dataset = "cifar"
 #dataset = "ptb_char"
 
 print "dataset", dataset
 
 if dataset == "mnist":
-    mn = gzip.open("/data/lisatmp3/kenan/data/mnist/mnist.pkl.gz")
+    mn = gzip.open("/data/lisatmp3/kenan/data/mnist.pkl.gz")
 
     train, valid, test = pickle.load(mn)
 
@@ -39,7 +41,7 @@ elif dataset == "cifar":
     nf = 32*32*3
 
     config = {}
-    config["cifar_location"] = "/data/lisatmp3/kenan/data/cifar/cifar-10-batches-py/"
+    config["cifar_location"] = "/data/lisatmp3/kenan/data/cifar-10-batches-py/"
     config['mb_size'] = 64
     config['image_width'] = 32
 
@@ -169,13 +171,24 @@ h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true_use, y_true
 h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next,step)
 
 print "0.1 mult"
-rec_loss = 0.1 * (T.sqr(x_rec - x_true_use).sum() + T.sqr(h_in - h_in_rec).sum() + crossent(y_rec, y_true_use))
+# rec_loss = 0.1 * (T.sqr(x_rec - x_true_use).sum() + T.sqr(h_in - h_in_rec).sum() + crossent(y_rec, y_true_use))
+
+# replace square loss by GAN loss
+d_cost_1, g_cost_1, d_params = Discriminator(x_rec, x_true_use) 
+g_cost_2 = T.sqr(h_in - h_in_rec).sum()
+#d_cost_2, g_cost_2, d_params = Discriminator(x_true_use, x_rec)
+g_cost_3 = crossent(y_rec, y_true_use)
+g_cost = ( g_cost_1 + g_cost_2 + g_cost_3).mean()
+d_cost = (d_cost_1).mean()
+rec_loss = 0.1 * g_cost
 
 #should pull y_rec and y_true together!  
 
 print "TURNED OFF CLASS LOSS IN FORWARD"
 #TODO: add in back params_forward.values()
 updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
+#updates_d = lasagne.updates.sgd(d_cost, d_params, 0.00001)
+#updates_forward.update(updates_d)
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
