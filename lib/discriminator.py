@@ -18,7 +18,7 @@ def layers2params(layers):
     return paramList
 
 def Discriminator(real, fake):
-    in_len = 784
+    in_len = 784 * 2
     m_disc = 512
 
     batch_size = 64
@@ -29,18 +29,13 @@ def Discriminator(real, fake):
     h2 = HiddenLayer(m_disc, m_disc)
     h3 = HiddenLayer(m_disc, 1, activation = 'sigmoid')
 
-    pc1 = h1.output(real)
+    pc1 = h1.output(pair)
     pc2 = h2.output(pc1)
     pc3 = h3.output(pc2)
 
     p_real = pc3[:,: real.shape[1]]
-    p_gen = pc3[:, -fake.shape[1]:]
+    p_gen = pc3[ :, -fake.shape[1]:]
 
-    '''qc1 = h1.output(fake)
-    qc2 = h2.output(qc1)
-    qc3 = h3.output(qc2)
-    p_gen = qc3
-    '''
     # masks for the cost, so that only the ones that are greater than a certain value gets passed
     real_mask = T.ones(p_real.shape) * 0.9
     gen_mask = T.ones(p_gen.shape) * 0.1
@@ -54,8 +49,6 @@ def Discriminator(real, fake):
     d_cost =  (d_cost_real + d_cost_gen) / 2
     g_cost = g_cost_d
     
-    
-
     layers = [h1,h2,h3]
     params = layers2params(layers)
     
