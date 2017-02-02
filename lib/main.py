@@ -178,7 +178,7 @@ d_cost_1, g_cost_1, d_params = Discriminator(x_rec, x_true_use)
 g_cost_2 = T.sqr(h_in - h_in_rec).sum()
 #d_cost_2, g_cost_2, d_params = Discriminator(x_true_use, x_rec)
 g_cost_3 = crossent(y_rec, y_true_use)
-g_cost = ( g_cost_1 + g_cost_2 + g_cost_3).mean()
+g_cost = ( g_cost_1 + g_cost_2 + g_cost_3)
 d_cost = (d_cost_1).mean()
 rec_loss = 0.1 * g_cost
 
@@ -187,10 +187,10 @@ rec_loss = 0.1 * g_cost
 print "TURNED OFF CLASS LOSS IN FORWARD"
 #TODO: add in back params_forward.values()
 updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
-#updates_d = lasagne.updates.sgd(d_cost, d_params, 0.00001)
-#updates_forward.update(updates_d)
+updates_d = lasagne.updates.sgd(d_cost, d_params, 0.01)
+updates_forward.update(updates_d)
 
-forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
+forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, d_cost, class_loss,acc,y_est], updates=updates_forward)
 forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
 
 
@@ -244,7 +244,7 @@ for iteration in xrange(0,100000):
     h_in = np.zeros(shape=(64,m)).astype('float32')
 
     for j in range(num_steps):
-        h_next, rec_loss, class_loss,acc,y_est = forward_method(x,y,h_in,j)
+        h_next, rec_loss, d_cost, class_loss,acc,y_est = forward_method(x,y,h_in,j)
         h_in = h_next
         #print "est", y_est
         #print "true", y
@@ -262,6 +262,7 @@ for iteration in xrange(0,100000):
         print "train acc", acc
         print "train cost", class_loss
         print "train rec_loss", rec_loss
+        print "discriminator loss", d_cost
         va = []
         vc = []
         for ind in range(0,10000,1000):
