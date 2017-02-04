@@ -58,16 +58,16 @@ def init_params_forward():
 
     param_init_lngru({}, params=p, prefix='gru1', nin=512, dim=512)
 
-    param_init_lngru({}, params=p, prefix='gru2', nin=512, dim=512)
+    #param_init_lngru({}, params=p, prefix='gru2', nin=512, dim=512)
 
     tparams = nn_layers.init_tparams(p)
 
     tparams["w1"] = theano.shared(0.01 * rng.normal(0,1,size=(2,512)).astype('float32'))
 
-    tparams["w2"] = theano.shared(0.01 * rng.normal(0,1,size=(512*2+2,512)).astype('float32'))
-    tparams["b2"] = theano.shared(0.0 * rng.normal(0,1,size=(512,)).astype('float32'))
+    tparams["w2"] = theano.shared(0.01 * rng.normal(0,1,size=(512+2,128)).astype('float32'))
+    tparams["b2"] = theano.shared(0.0 * rng.normal(0,1,size=(128,)).astype('float32'))
 
-    tparams["Wy"] = theano.shared(0.01 * rng.normal(0,1,size=(512,2)).astype('float32'))
+    tparams["Wy"] = theano.shared(0.01 * rng.normal(0,1,size=(128,2)).astype('float32'))
     tparams["by"] = theano.shared(0.0 * rng.normal(0,1,size=(2,)).astype('float32'))
 
     return tparams
@@ -76,7 +76,7 @@ def init_params_synthmem():
 
     p = {}
 
-    param_init_fflayer({},params=p,prefix="synthmem_fc1", nin=1024, nout=1024)
+    param_init_fflayer({},params=p,prefix="synthmem_fc1", nin=512, nout=512)
 
     tparams = nn_layers.init_tparams(p)
 
@@ -101,11 +101,11 @@ def forward(p, h, x_true, y_true):
 
     h_next1 = lngru_layer(p,emb,{},prefix='gru1',mask=None,one_step=True,init_state=h[:,:512],backwards=False)
 
-    h_next2 = lngru_layer(p,h_next1[0],{},prefix='gru2',mask=None,one_step=True,init_state=h[:,512:],backwards=False)
+    #h_next2 = lngru_layer(p,h_next1[0],{},prefix='gru2',mask=None,one_step=True,init_state=h[:,512:],backwards=False)
 
-    hout = join3(h_next2[0], h_next1[0], x_true)
+    hout = join2(h_next1[0], x_true)
 
-    h2 = T.tanh(T.dot(hout, p['w2']) + p['b2'])
+    h2 = T.tanh(ln(T.dot(hout, p['w2']) + p['b2']))
 
     y_est = T.nnet.softmax(T.dot(h2, p['Wy']) + p['by'])
 
@@ -113,7 +113,7 @@ def forward(p, h, x_true, y_true):
 
     acc = accuracy(y_est, y_true)
 
-    return join2(h_next1[0],h_next2[0]), y_est, loss, acc
+    return h_next1[0], y_est, loss, acc
 
 params_forward = init_params_forward()
 params_synthmem = init_params_synthmem()
@@ -144,14 +144,11 @@ h_initial = T.matrix()
 def one_step(xval,yval,total_loss,total_acc,hval,yel,h_rec_loss_last):
     h_next,y_est,loss,acc = forward(params_forward, hval, expand(xval,2).astype('float32'),yval)
 
-    #h_last_rec, h_rec_loss = synthmem(params_synthmem, h_next, hval)
-    h_rec_loss = 0.0 * T.mean(total_loss)
-
-    #goes from hval, xval, yval to h_next.  Should train model to predict xval,yval,hval from h_next.  
+    h_last_rec, h_rec_loss = synthmem(params_synthmem, h_next, hval)
 
     return [(loss).astype('float32'),(acc).astype('float32'),h_next.astype('float32'),y_est.argmax(axis=1).astype('float32'),h_rec_loss]
 
-h_initial_shared = theano.shared(0.0 * rng.normal(size = (1,512*2)).astype('float32'))
+h_initial_shared = theano.shared(0.0 * rng.normal(size = (1,512)).astype('float32'))
 h_next = h_initial + T.addbroadcast(h_initial_shared, 0)
 
 y_est = theano.shared(np.zeros(shape=(64,)).astype('float32'))
@@ -169,7 +166,7 @@ lr = 0.0001
 print "learning rate", lr
 rule = lasagne.updates.adam
 print "rule", rule
-updates = rule(loss_use, params_forward.values() + [h_initial_shared], learning_rate=lr)
+updates = rule(loss_use, params_forward.values() + [h_initial_shared] + params_synthmem.values(), learning_rate=lr)
 
 t0 = time.time()
 
@@ -177,16 +174,6 @@ train_bptt = theano.function(inputs = [x,y,h_initial], outputs = [h_final[-1], t
 print "time to compile", time.time() - t0
 
 evaluate = theano.function(inputs = [x,y,h_initial], outputs = [h_final[-1], total_loss.sum()/64.0, total_acc.mean(),yest,h_rec_loss.sum()/64.0])
-
-x_one = T.ivector()
-y_one = T.ivector()
-h_one = T.matrix()
-
-hn, _, loss, _ = forward(params_forward, h_one, expand(x_one,2).astype('float32'),y_one)
-
-updates = lasagne.updates.adam(loss, params_forward.values())
-
-step_forward = theano.function(inputs = [x_one, y_one, h_one], outputs=[hn], updates=updates)
 
 ta = []
 tc = []
@@ -198,21 +185,27 @@ for iteration in xrange(0,100000):
 
     t0 = time.time()
 
-    h_initial = 0.0 * np.random.normal(size=(64,1024)).astype('float32')
+    h_initial = 0.0 * np.random.normal(size=(64,512)).astype('float32')
+
+    lossl = []
+    accl = []
 
     t0 = time.time()
-    for step in range(0,20):
-        h_initial,_,_,_ = train_bptt(x[:,step*39:step*40],y[:,step*39:step*40],h_initial)
-    print time.time() - t0, "time to run forward on one example, 10x78"
+    for step in range(0,1):
+        h_initial,loss,acc,_ = train_bptt(x[:,step*783:(step+1)*783],y[:,step*783:(step+1)*783],h_initial)
+        lossl.append(loss)
+        accl.append(acc)
 
-    print "yest shape", yest.shape
+    #print "yest shape", yest.shape
 
-    print loss,acc
+    #print loss,acc
 
     if iteration % 100 == 0:
         print "iteration", iteration
         #print time.time() - t0, "TIME TO TRAIN ONE EXAMPLE"
 
+        print "loss train", sum(lossl)
+        print "acc train", sum(accl)/len(accl)
 
         #print "true", y[0,:].tolist()
         #print "est", yest[:,0].tolist()
@@ -223,11 +216,11 @@ for iteration in xrange(0,100000):
         for j in range(0,50):
             x,y = get_batch("test",64)
 
-            h_initial = 0.0 * np.random.normal(size=(64,1024)).astype('float32')
+            h_initial = 0.0 * np.random.normal(size=(64,512)).astype('float32')
 
-            t0 = time.time()
+            #t0 = time.time()
             h_out,loss,acc,yest,h_rec_loss = evaluate(x,y,h_initial)
-            print time.time() - t0, "time to do validation update"
+            #print time.time() - t0, "time to do validation update"
 
             lossl.append(loss)
             accl.append(acc)
@@ -236,6 +229,7 @@ for iteration in xrange(0,100000):
         print "TEST LOSS", iteration, sum(lossl)/len(lossl)
         print "TEST ACC", iteration, sum(accl)/len(accl)
         print "TEST RECLOSS", iteration, sum(hreclossl)/len(hreclossl)
+
 
 
 

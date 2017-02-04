@@ -15,11 +15,23 @@ from random import randint
 
 from load_cifar import CifarData
 
-#dataset = "mnist"
-dataset = "cifar"
+dataset = "mnist"
+#dataset = "cifar"
 #dataset = "ptb_char"
 
 print "dataset", dataset
+
+do_synthmem = True
+
+print "do synthmem", do_synthmem
+
+sign_trick = False
+
+print "sign trick", sign_trick
+
+use_class_loss_forward = 0.0
+
+print "use class loss forward", use_class_loss_forward
 
 if dataset == "mnist":
     mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
@@ -129,7 +141,7 @@ def forward(p, h, x_true, y_true, i):
 
     acc = accuracy(y_est, y_true)
 
-    return h_next, y_est, loss, acc
+    return h_next, y_est, loss, acc, y_est
 
 def synthmem(p, h_next, i): 
 
@@ -148,7 +160,6 @@ def synthmem(p, h_next, i):
 params_forward = init_params_forward()
 params_synthmem = init_params_synthmem()
 
-
 '''
 Set up the forward method and the synthmem_method
 '''
@@ -158,13 +169,11 @@ y_true = T.ivector()
 h_in = T.matrix()
 step = T.iscalar()
 
-print "giving x and y on all steps"
+y_true_use = T.switch(T.eq(step, num_steps-1), y_true, 10)
 
-y_true_use = y_true
+x_true_use = T.switch(T.eq(step, 0), x_true, x_true*0.0)
 
-x_true_use = x_true
-
-h_next, y_est, class_loss,acc = forward(params_forward, h_in, x_true_use, y_true_use,step)
+h_next, y_est, class_loss,acc,probs = forward(params_forward, h_in, x_true_use, y_true_use,step)
 
 h_in_rec, x_rec, y_rec = synthmem(params_synthmem, h_next,step)
 
@@ -173,13 +182,10 @@ rec_loss = 0.1 * (T.sqr(x_rec - x_true_use).sum() + T.sqr(h_in - h_in_rec).sum()
 
 #should pull y_rec and y_true together!  
 
-print "TURNED OFF CLASS LOSS IN FORWARD"
-#TODO: add in back params_forward.values()
-updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values())
+updates_forward = lasagne.updates.adam(rec_loss + use_class_loss_forward * class_loss, params_forward.values() + params_synthmem.values())
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,y_est], updates=updates_forward)
-forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
-
+forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc,probs])
 
 '''
 Goal: get a method that takes h[i+1] and dL/dh[i+1].  It runs synthmem on h[i+1] to get estimates of x[i], y[i], and h[i].  It then runs the forward on those values and gets that loss.  
@@ -195,31 +201,25 @@ h_last, x_last, y_last = synthmem(params_synthmem, h_next,step)
 x_last = x_last
 y_last = y_last.argmax(axis=1)
 
-h_next_rec, y_est, class_loss,acc = forward(params_forward, h_last, x_last, y_last,step)
+h_next_rec, y_est, class_loss,acc,probs = forward(params_forward, h_last, x_last, y_last,step)
 
-print "ONLY USING CLASS LOSS ON FINAL STEP"
 class_loss = class_loss * T.eq(step,num_steps-1)
 
-#g_next_use = g_next*1.0
-
-
-print "DOING MATCHING TRICK"
-g_next_use = g_next * T.eq(T.sgn(h_next), T.sgn(h_next_rec))
+if sign_trick:
+    g_next_use = g_next * T.eq(T.sgn(h_next), T.sgn(h_next_rec))
+else:
+    g_next_use = g_next
 
 hdiff = T.eq(T.sgn(h_next), T.sgn(h_next_rec)).mean()
 g_last = T.grad(class_loss, h_last, known_grads = {h_next_rec*1.0 : g_next_use})
 g_last_local = T.grad(class_loss, h_last)
 
-#out_grad = T.grad(loss, h_in_init, known_grads = {h_out*1.0 : in_grad * T.gt(h_in_init,0.0)})
-#param_grads = T.grad(net['loss'], params.values(), known_grads = {net['h_out']*1.0 : in_grad*1.0})
-
-print "synthmem mult 1"
 param_grads = T.grad(class_loss * 1.0, params_forward.values(), known_grads = {h_next_rec*1.0 : g_next_use})
 
 #Should we also update gradients through the synthmem module?
 synthmem_updates = lasagne.updates.adam(param_grads, params_forward.values())
 
-synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_last, g_last, hdiff, g_last_local], updates = synthmem_updates)
+synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_last, g_last, hdiff, g_last_local,x_last], updates = synthmem_updates)
 
 m = 1024
 
@@ -239,9 +239,15 @@ for iteration in xrange(0,100000):
     g_next = np.zeros(shape=(64,m)).astype('float32')
 
 
-    for k in reversed(range(0,num_steps)):
-        h_next, g_last,hdiff,g_last_local = synthmem_method(h_next,g_next,k)
-        g_next = g_last
+    if do_synthmem==True:
+        for k in reversed(range(0,num_steps)):
+            h_next, g_last,hdiff,g_last_local,x_last_rec,y_last_rec = synthmem_method(h_next,g_next,k)
+            g_next = g_last
+
+        if iteration % 500 == 0:
+            print "step", k
+            print "y last rec", y_last_rec[0]
+            print "x last rec", x_last_rec[0].round(2).tolist()
 
     #using 500
     if iteration % 100 == 0:
@@ -254,7 +260,7 @@ for iteration in xrange(0,100000):
         for ind in range(0,10000,1000):
             h_in = np.zeros(shape=(1000,m)).astype('float32')
             for j in range(num_steps):
-                h_next,rec_loss,class_loss,acc = forward_method_noupdate(validx[ind:ind+1000], validy[ind:ind+1000], h_in, j)
+                h_next,rec_loss,class_loss,acc,probs = forward_method_noupdate(validx[ind:ind+1000], validy[ind:ind+1000], h_in, j)
                 h_in = h_next
 
             va.append(acc)
@@ -266,6 +272,15 @@ for iteration in xrange(0,100000):
         print "Valid cost", sum(vc)/len(vc)
 
 
+    if iteration % 500 == 0:
+        print "testing on noisy input"
+        h_in = np.zeros(shape=(1000,m)).astype('float32')
+        x_val = rng.normal(size=(1000,784)).astype('float32')
+        for j in range(num_steps):
+            h_next,rec_loss,class_loss,acc,probs = forward_method_noupdate(x_val, validy[ind:ind+1000], h_in, j)
+            h_in = h_next
 
+        print "acc noisy", acc
+        print "probs", probs[0]
 
 
