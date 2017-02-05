@@ -12,6 +12,9 @@ import numpy.random as rng
 import lasagne
 import numpy as np
 from random import randint
+import os
+
+from viz import plot_images
 
 from load_cifar import CifarData
 
@@ -32,6 +35,10 @@ print "sign trick", sign_trick
 use_class_loss_forward = 0.0
 
 print "use class loss forward", use_class_loss_forward
+
+print "using two forward layers"
+
+print "only training synthmem module in forward"
 
 if dataset == "mnist":
     mn = gzip.open("/u/lambalex/data/mnist/mnist.pkl.gz")
@@ -86,7 +93,7 @@ def init_params_forward():
     p = {}
 
     p['W1'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024+nf,1024)).astype('float32'))
-    #p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(1024,1024)).astype('float32'))
+    p['W2'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,1024)).astype('float32'))
     p['Wy'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,11)).astype('float32'))
     #p['Wo'] = theano.shared(0.03 * rng.normal(0,1,size=(num_steps,1024,1024)).astype('float32'))
 
@@ -129,8 +136,8 @@ def forward(p, h, x_true, y_true, i):
     inp = join2(h, x_true)
 
     h1 = T.nnet.relu(ln(T.dot(inp, p['W1'][i])), alpha=0.02)
-    #h2 = T.nnet.relu(ln(T.dot(h1, p['W2'])), alpha=0.02)
-    h2 = h1
+    h2 = T.nnet.relu(ln(T.dot(h1, p['W2'][i])), alpha=0.02)
+    #h2 = h1
 
     y_est = T.nnet.softmax(T.dot(h2, p['Wy'][i]))
 
@@ -219,12 +226,13 @@ param_grads = T.grad(class_loss * 1.0, params_forward.values(), known_grads = {h
 #Should we also update gradients through the synthmem module?
 synthmem_updates = lasagne.updates.adam(param_grads, params_forward.values())
 
-synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_last, g_last, hdiff, g_last_local,x_last], updates = synthmem_updates)
+synthmem_method = theano.function(inputs = [h_next, g_next, step], outputs = [h_last, g_last, hdiff, g_last_local,x_last,y_last], updates = synthmem_updates)
 
 m = 1024
 
 for iteration in xrange(0,100000):
     r = randint(0,49900)
+
     x = trainx[r:r+64]
     y = trainy[r:r+64]
 
@@ -244,10 +252,14 @@ for iteration in xrange(0,100000):
             h_next, g_last,hdiff,g_last_local,x_last_rec,y_last_rec = synthmem_method(h_next,g_next,k)
             g_next = g_last
 
-        if iteration % 500 == 0:
-            print "step", k
-            print "y last rec", y_last_rec[0]
-            print "x last rec", x_last_rec[0].round(2).tolist()
+            if iteration % 500 == 0:
+                print "step", k
+                if k == num_steps-1:
+                    print "y last rec", y_last_rec[0]
+                if k == 0:
+                    print "saving images"
+                    plot_images(x_last_rec, "plots/" + os.environ["SLURM_JOB_ID"] + "_img.png", str(iteration))
+                    plot_images(x, "plots/" + os.environ["SLURM_JOB_ID"] + "_real.png", str(iteration))
 
     #using 500
     if iteration % 100 == 0:
@@ -275,7 +287,7 @@ for iteration in xrange(0,100000):
     if iteration % 500 == 0:
         print "testing on noisy input"
         h_in = np.zeros(shape=(1000,m)).astype('float32')
-        x_val = rng.normal(size=(1000,784)).astype('float32')
+        x_val = rng.normal(size=(1000,nf)).astype('float32')
         for j in range(num_steps):
             h_next,rec_loss,class_loss,acc,probs = forward_method_noupdate(x_val, validy[ind:ind+1000], h_in, j)
             h_in = h_next
