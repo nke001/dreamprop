@@ -33,20 +33,17 @@ def Discriminator(real, fake):
     pc2 = h2.output(pc1)
     pc3 = h3.output(pc2)
 
-    p_real = pc3[:,: real.shape[1]]
-    p_gen = pc3[ :, -fake.shape[1]:]
+    p_real = pc3[:,: real.shape[1]].flatten()
+    p_gen = pc3[ :, -real.shape[1]:].flatten()
 
-    # masks for the cost, so that only the ones that are greater than a certain value gets passed
-    real_mask = T.ones(p_real.shape) * 0.9
-    gen_mask = T.ones(p_gen.shape) * 0.1
 
-    d_cost_real = binary_crossentropy(p_real, T.ones(p_real.shape))
+    d_cost_real = binary_crossentropy(p_real, T.ones(p_real.shape)).mean()
     #d_cost_real = (d_cost_real * (d_cost_real < 0.9)).mean()
-    d_cost_gen = binary_crossentropy(p_gen, T.zeros(p_gen.shape))
+    d_cost_gen = binary_crossentropy(p_gen, T.zeros(p_gen.shape)).mean()
     #d_cost_gen = (d_cost_gen * (d_cost_gen > 0.1)).mean()
     g_cost_d = binary_crossentropy(p_gen, T.ones(p_gen.shape)).mean()
     
-    d_cost =  (d_cost_real + d_cost_gen) / 2
+    d_cost =  (d_cost_real + d_cost_gen ) / 2.0
     g_cost = g_cost_d
     
     layers = [h1,h2,h3]
