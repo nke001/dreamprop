@@ -18,12 +18,12 @@ def layers2params(layers):
     return paramList
 
 def Discriminator(real, fake):
-    in_len = 784 * 2
+    in_len = 784
     m_disc = 512
 
     batch_size = 64
     
-    pair = T.concatenate([real, fake], axis=1)
+    pair = T.concatenate([real, fake], axis=0)
 
     h1 = HiddenLayer(in_len, m_disc)
     h2 = HiddenLayer(m_disc, m_disc)
@@ -33,14 +33,14 @@ def Discriminator(real, fake):
     pc2 = h2.output(pc1)
     pc3 = h3.output(pc2)
 
-    p_real = pc3[:,: real.shape[1]].flatten()
-    p_gen = pc3[ :, -real.shape[1]:].flatten()
+    p_real = pc3[:real.shape[0],: ].flatten()
+    p_gen = pc3[ -real.shape[0]: , :].flatten()
 
 
     d_cost_real = binary_crossentropy(p_real, T.ones(p_real.shape)).mean()
-    #d_cost_real = (d_cost_real * (d_cost_real < 0.9)).mean()
+    d_cost_real = (d_cost_real * (d_cost_real < 0.9)).mean()
     d_cost_gen = binary_crossentropy(p_gen, T.zeros(p_gen.shape)).mean()
-    #d_cost_gen = (d_cost_gen * (d_cost_gen > 0.1)).mean()
+    d_cost_gen = (d_cost_gen * (d_cost_gen > 0.1)).mean()
     g_cost_d = binary_crossentropy(p_gen, T.ones(p_gen.shape)).mean()
     
     d_cost =  (d_cost_real + d_cost_gen ) / 2.0
