@@ -177,9 +177,8 @@ print "0.1 mult"
 g_cost_aux = T.sqr(x_rec - x_true_use).sum()
 d_cost, g_cost_1, d_params = Discriminator(x_true_use, x_rec ) 
 g_cost_2 = T.sqr(h_in - h_in_rec).sum()
-#d_cost_2, g_cost_2, d_params = Discriminator(x_true_use, x_rec)
 g_cost_3 = crossent(y_rec, y_true_use)
-g_cost = ( g_cost_1 + g_cost_2 +  g_cost_3)
+g_cost = ( g_cost_1 + g_cost_2 +  g_cost_3 + g_cost_aux)
 d_cost = d_cost
 rec_loss = 0.1 * g_cost
 
@@ -188,7 +187,7 @@ rec_loss = 0.1 * g_cost
 print "TURNED OFF CLASS LOSS IN FORWARD"
 #TODO: add in back params_forward.values()
 updates_forward = lasagne.updates.adam(rec_loss + 0.0 * class_loss, params_forward.values() + params_synthmem.values() )
-updates_d = lasagne.updates.sgd(d_cost, d_params, 0.1)
+updates_d = lasagne.updates.sgd(d_cost, d_params, 0.01)
 updates_forward.update(updates_d)
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, g_cost_aux, d_cost, class_loss,acc,y_est], updates=updates_forward)
