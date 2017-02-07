@@ -207,7 +207,7 @@ updates_d = lasagne.updates.sgd(d_cost, d_params, 0.01)
 updates_forward.update(updates_d)
 
 forward_method = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, g_cost_aux, d_cost, class_loss,acc,y_est], updates=updates_forward)
-forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc])
+forward_method_noupdate = theano.function(inputs = [x_true,y_true,h_in,step], outputs = [h_next, rec_loss, class_loss,acc, probs])
 
 #updates_forward = lasagne.updates.adam(rec_loss + use_class_loss_forward * class_loss, params_forward.values() + params_synthmem.values())
 
@@ -231,6 +231,10 @@ y_last = y_last.argmax(axis=1)
 h_next_rec, y_est, class_loss,acc,probs = forward(params_forward, h_last, x_last, y_last,step)
 
 class_loss = class_loss * T.eq(step,num_steps-1)
+
+from random import randint
+
+dir_name = str(randint(0, 1000000)) + "_GAN"
 
 if sign_trick:
     g_next_use = g_next * T.eq(T.sgn(h_next), T.sgn(h_next_rec))
@@ -278,8 +282,10 @@ for iteration in xrange(0,100000):
                     print "y last rec", y_last_rec[0]
                 if k == 0:
                     print "saving images"
-                    plot_images(x_last_rec, "plots/" + os.environ["SLURM_JOB_ID"] + "_img.png", str(iteration))
-                    plot_images(x, "plots/" + os.environ["SLURM_JOB_ID"] + "_real.png", str(iteration))
+                    plot_images(x_last_rec, "plots/" + dir_name + "_img.png", str(iteration))
+                    plot_images(x, "plots/" + dir_name + "_real.png", str(iteration))
+                    #plot_images(x_last_rec, "plots/" + os.environ["SLURM_JOB_ID"] + "_img.png", str(iteration))
+                    #plot_images(x, "plots/" + os.environ["SLURM_JOB_ID"] + "_real.png", str(iteration))
 
     #using 500
     if iteration % 100 == 0:
